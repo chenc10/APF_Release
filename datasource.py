@@ -148,14 +148,11 @@ class ImageNet():
         random.seed(rank)
         torch.manual_seed(rank)
 
-	traindir = '/home/ubuntu/data/imagenet/train'
-	valdir = '/home/ubuntu/data/imagenet/validate'
-
-	traindir = '/data/imagenet/train'
-	valdir = '/data/imagenet/validate'
-
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+        traindir = '/home/ubuntu/data/imagenet/train'
+        valdir = '/home/ubuntu/data/imagenet/validate'
+        traindir = '/data/imagenet/train'
+        valdir = '/data/imagenet/validate'
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
 
         self.train_loader = torch.utils.data.DataLoader(
             datasets.ImageFolder(traindir, transforms.Compose([
