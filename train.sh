@@ -114,7 +114,7 @@ do
 			--weight_decay=$weight_decay \ 
 			--sync_frequency=$sync_frequency --frozen_frequency=$frozen_frequency --ema_alpha=$ema_alpha --stable_threshold=$stable_threshold"
 
-	nohup ssh $i "python $home/worker_process_apf.py \
+	nohup ssh $i "source /usr/local/miniconda/bin/activate pytorch; python $home/worker_process_apf.py \
 			--master_address='tcp://'$master':22222' --rank=$num --world_size=$world_size \
 			--model=$model --dataset=$dataset --initial_lr=$initial_lr --batch_size=$batch_size \
 			--weight_decay=$weight_decay \
