@@ -8,6 +8,8 @@ The logs can be find under `Logs/`, with trial number included in the folder nam
 
 To stop training, run `bash clear.sh <trial-no>` (to stop one particular trial) or `pkill python2` (to stop all the trials).
 
+The first time you run this program, it would take some time to download the CIFAR-10 and MNIST dataset.
+
 Env: torch.__version__ 1.0.0, torchvision.__version__ 0.2.2
 
 ## File Description
