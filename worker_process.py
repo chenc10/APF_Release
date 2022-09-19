@@ -9,13 +9,15 @@ CUDA = torch.cuda.is_available()
 
 class Client:
     def __init__(self, local_profile, sync_profile):
-        ''' Variables required for local training. '''
+        """ Variables required for local training. """
+        
+        ''' Model Initialization '''
         self.model_manager = Model_Manager(local_profile['model_profile'])
         self.model = self.model_manager.load_model()
         self.optimizer = self.model_manager.get_optimizer()
-        # self.loss_func = self.model_manager.get_loss_func()
-        self.loss_func = torch.nn.CrossEntropyLoss()
+        self.loss_func = self.model_manager.get_loss_func()
 
+        ''' Dataset Initialization ''' 
         self.dataset_manager = Dataset_Manager(local_profile['dataset_profile'])
         self.training_dataloader = self.dataset_manager.get_training_dataloader()
         self.testing_dataloader = self.dataset_manager.get_testing_dataloader()
@@ -48,7 +50,7 @@ class Client:
     def train(self):
         print('\n\n\t-------- START TRAINING --------\n')
         # self.logging(list(self.model.parameters())[0][0][0].data)
-        iter_id, epoch_id  = 0, 0
+        iter_id, round_id, epoch_id  = 0, 0, 0
         while epoch_id < self.max_epoch:
             epoch_id += 1 
             self.logging('start epoch: %d' % epoch_id)
@@ -61,10 +63,11 @@ class Client:
                 self.loss_func(self.model(b_x), b_y).backward()
                 self.optimizer.step()
                 if self.sync_manager.try_sync_model(iter_id):
+                    round_id += 1
                     if self.rank == 0:
                         accuracy = self.test()
                         self.logging(' - test - iter_id: %d; epoch_id: %d, round_id: %d; accuracy: %.4f;' % (iter_id, epoch_id, self.sync_manager.sync_round_id, accuracy))
-                    numpy.save('/home/chenchen/NPY/param_client_%d_epoch_%d' % (self.rank, epoch_id), list(self.model.parameters())[0][0][0].detach().cpu().numpy())
+                        # numpy.save('/root/adaptive_freezing/vgg-npy/param_round_%d' % round_id, list(self.model.parameters())[0][0].detach().cpu().numpy())
             self.logging('finish epoch: %d\n' % epoch_id)
 
 
@@ -83,9 +86,11 @@ if __name__ == "__main__":
         torch.cuda.set_device(args.rank % torch.cuda.device_count())
     print('Trial ID: ' + str(args.trial_no) + '; Exp Setup Remarks: ' + args.remarks + '\n')
 
-    ''' Local Training Profile '''
-    model_name, dataset_name, is_iid = 'LSTM_KWS', 'KWS', False
-    model_name, dataset_name, is_iid = 'CNN_Cifar10', 'Cifar10', False
+    ''' A. Local Training Profile '''
+    model_name, dataset_name, is_iid = 'VGG16_Cifar10', 'Cifar10', True
+    model_name, dataset_name, is_iid = 'CNN_Cifar10', 'Cifar10', True
+    model_name, dataset_name, is_iid = 'LSTM_KWS', 'KWS', True
+    model_name, dataset_name, is_iid = 'ResNet18_Cifar10', 'Cifar10', True
     local_training_profile = {
         'model_profile' : {
             'model_name' : model_name,
@@ -101,11 +106,11 @@ if __name__ == "__main__":
     pprint.pprint(local_training_profile)
     print
 
-    ''' Synchronization Profile '''
-    sync_frequency = 100
-    interlayer_type = 'Default'  # Default, APF, Gaia, CMFL
+    ''' B. Synchronization Profile '''
+    sync_frequency = 10
     interlayer_type = 'CMFL'  # Default, APF, Gaia, CMFL
     interlayer_type = 'Gaia'  # Default, APF, Gaia, CMFL
+    interlayer_type = 'Default'  # Default, APF, Gaia, CMFL
     interlayer_type = 'APF'  # Default, APF, Gaia, CMFL
     sync_profile = {
         'sync_frequency' : sync_frequency,

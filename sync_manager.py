@@ -12,8 +12,8 @@ InterlayerProfileDict = {
     'APF': {
         'freezing_check_frequency' : 1, # unit for freezing_frequency is 'round'
         'ema_alpha' : 0.99,
-        'stable_threshold' : 0.05,
-        'enable_random_freezing' : False
+        'stable_threshold' : 0.01, # 0.01, # 0.05
+        'enable_random_freezing' : True
     },
     'Gaia': {
         'initial_stable_threshold' : 0.01
@@ -90,10 +90,10 @@ class APF_Interlayer:
         effective_stepping_rate = torch.abs(self.grad_ema[self.active_index]) / self.abs_grad_ema[self.active_index]
 
         ''' Update the freezing period length and also the should-be-unfrozen frequency_check_round_id based on effective stepping rate of each param. '''
-        self.freezing_lengths[self.active_index] = torch.where(effective_stepping_rate < self.stable_threshold, self.freezing_lengths[self.active_index]+1, self.freezing_lengths[self.active_index]/2)
+        self.freezing_lengths[self.active_index] = torch.where(effective_stepping_rate < self.stable_threshold, self.freezing_lengths[self.active_index]+1, self.freezing_lengths[self.active_index]//2)
         self.fc_round_ids_to_unfreeze_params[self.active_index] = self.fc_round_id + self.freezing_lengths[self.active_index] + 1
         if self.enable_random_freezing:
-            self.randomly_freeze_active_params(self.active_index)
+            self.randomly_freeze_active_params()
         self.last_tensor_of_flattened_params = copy.deepcopy(self.tensor_of_flattened_params)
 
     def refresh_freezing_status(self):
@@ -110,10 +110,14 @@ class APF_Interlayer:
             self.logging('make stable criterion tighter')
 
     def randomly_freeze_active_params(self):
-        rand_array = torch.rand(self.active_index.shape) * 100
-        rand_frozen = torch.where(rand_array < self.fc_round_id / 20.0, rand_array.int(), torch.zeros(rand_array.shape).int())
-        rand_frozen = rand_frozen.cuda() if CUDA else rand_frozen 
-        self.fc_round_ids_to_unfreeze_params[self.active_index] = self.fc_round_ids_to_unfreeze_params[self.active_index] + rand_frozen 
+        # rand_array = torch.rand(self.active_index.shape) * 100
+        # rand_frozen = torch.where(rand_array < 50, torch.ones(rand_array.shape).int() , torch.zeros(rand_array.shape).int())
+        # rand_frozen = rand_frozen.cuda() if CUDA else rand_frozen 
+        # self.fc_round_ids_to_unfreeze_params[self.active_index] = self.fc_round_ids_to_unfreeze_params[self.active_index] + rand_frozen 
+        rand_array = torch.rand(self.flattened_param_length)
+        rand_frozen = torch.where(rand_array < 0.5, torch.ones(rand_array.shape).int() , torch.zeros(rand_array.shape).int())
+        rand_frozen = rand_frozen.cuda() if CUDA else rand_frozen
+        self.fc_round_ids_to_unfreeze_params = self.fc_round_ids_to_unfreeze_params + rand_frozen
 
     """ Below are the public APIs callable by Sync_Manager. """
     def generate_tensor_list_to_transmit(self, iter_id):
@@ -175,6 +179,8 @@ class Gaia_Interlayer:
             self.significant_mask_list[i] = (torch.abs(self.last_param_list[i]/param.data - 1) > stable_threshold)
             tensor_to_transmit = torch.where(self.significant_mask_list[i], param.data, self.last_param_list[i])
             tensor_list_to_transmit.append(tensor_to_transmit)
+        # problem-1: no actual compression
+        # problem-2: no error accumulation
         self.significant_ratio = sum([float(significant_mask.sum()) for significant_mask in self.significant_mask_list]) / self.total_param_num
         self.logging('current significant ratio: %.4f' % self.significant_ratio)
         return tensor_list_to_transmit
@@ -288,9 +294,10 @@ class Sync_Manager:
 
     def init_dist(self, dist_profile):
         self.world_size = dist_profile['world_size']  # world_size is required in all_reduce averaging.
-        dist.init_process_group(backend='nccl' if CUDA else 'tcp', init_method=dist_profile['master_address'], world_size=dist_profile['world_size'], rank=dist_profile['rank'])
-        for param in self.model.parameters():
-            dist.broadcast(param.data, src=0)
+        if self.world_size > 1:
+            dist.init_process_group(backend='nccl' if CUDA else 'gloo', init_method=dist_profile['master_address'], world_size=dist_profile['world_size'], rank=dist_profile['rank'])
+            for param in self.model.parameters():
+                dist.broadcast(param.data, src=0)
 
     def try_sync_model(self, iter_id):
         ''' Conduct remote synchronization. '''
@@ -299,7 +306,9 @@ class Sync_Manager:
             self.sync_round_id += 1
             tensor_list_received = []
             for tensor_to_transmit in tensor_list_to_transmit:
-                dist.all_reduce(tensor_to_transmit, op=dist.reduce_op.SUM)  # transmit parameter
+                if self.world_size > 1: # to handle faked-distributed mode
+                    dist.all_reduce(tensor_to_transmit, op=dist.reduce_op.SUM)  # transmit parameter
+                ### dump npy file here
                 tensor_list_received.append(tensor_to_transmit / self.world_size)  # receive parameter
             self.transmit_interlayer.restore_model_from_tensor_list_received(tensor_list_received)
             return True

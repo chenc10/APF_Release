@@ -1,10 +1,11 @@
 ### set home directory
-home=$HOME'/adaptive_freezing'
+home='/root/adaptive_freezing'
 
 ### prepare master and workers
 master='localhost'
 workers='localhost'
-workers='localhost localhost localhost localhost'
+# workers='localhost localhost'
+#workers='localhost localhost localhost localhost'
 #localhost localhost'
 echo 'master(coordinator): '$master
 echo 'worker_hosts: '$workers
@@ -32,7 +33,7 @@ num=0
 job=worker_process.py
 for i in $workers
 do
-	command="export CUDA_VISIBLE_DEVICES=$cuda && python2 $home/$job --master_address=tcp://${master}:$((20000+trial_no)) --rank=$num --world_size=$world_size --remarks=$remarks --trial_no=$trial_no"
+	command="export CUDA_VISIBLE_DEVICES=$cuda && python3 $home/$job --master_address=tcp://${master}:$((20000+trial_no)) --rank=$num --world_size=$world_size --remarks=$remarks --trial_no=$trial_no"
 	echo $command
 	nohup ssh $i $command > $log_dir/worker_$num.log 2>&1 &
 	num=$((num+1))
