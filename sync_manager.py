@@ -1,4 +1,5 @@
 import torch
+import rpyc
 import copy, sys, numpy, math, datetime, pprint
 try:
     import torch.distributed.deprecated as dist
@@ -269,13 +270,17 @@ class Default_Interlayer:
 
 class Sync_Manager:
     """ This object shall be able to run without apf (support standard FL by default) """
-    def __init__(self, model, sync_profile):
+    def __init__(self, model, rank, sync_profile):
         self.model = model
         self.sync_round_id = 0
         self.world_size = -1  # world_size is required in all_reduce averaging.
         self.sync_frequency = sync_profile['sync_frequency']
         self.transmit_interlayer = self.create_transmit_interlayer(sync_profile['interlayer_type'])
-        self.init_dist(sync_profile['dist_profile'])
+        self.rank = rank 
+        
+        rpyc_config = rpyc.core.protocol.DEFAULT_CONFIG
+        rpyc_config['allow_pickle'] = True
+        self.connection = rpyc.connect(sync_profile['server_ip'], sync_profile['server_port'], config=rpyc_config)
 
     def logging(self, string):
         print('['+str(datetime.datetime.now())+'] [Sync Manager] '+str(string))
@@ -292,24 +297,15 @@ class Sync_Manager:
             transmit_interlayer = CMFL_Interlayer(self.model, self.sync_frequency, InterlayerProfileDict[interlayer_type])
         return transmit_interlayer
 
-    def init_dist(self, dist_profile):
-        self.world_size = dist_profile['world_size']  # world_size is required in all_reduce averaging.
-        if self.world_size > 1:
-            dist.init_process_group(backend='nccl' if CUDA else 'gloo', init_method=dist_profile['master_address'], world_size=dist_profile['world_size'], rank=dist_profile['rank'])
-            for param in self.model.parameters():
-                dist.broadcast(param.data, src=0)
-
     def try_sync_model(self, iter_id):
         ''' Conduct remote synchronization. '''
         tensor_list_to_transmit = self.transmit_interlayer.generate_tensor_list_to_transmit(iter_id)
         if tensor_list_to_transmit != []:
             self.sync_round_id += 1
-            tensor_list_received = []
-            for tensor_to_transmit in tensor_list_to_transmit:
-                if self.world_size > 1: # to handle faked-distributed mode
-                    dist.all_reduce(tensor_to_transmit, op=dist.reduce_op.SUM)  # transmit parameter
-                ### dump npy file here
-                tensor_list_received.append(tensor_to_transmit / self.world_size)  # receive parameter
+            tensor_list_to_transmit = [i.cpu() for i in tensor_list_to_transmit] if CUDA else tensor_list_to_transmit
+            tensor_list_received = self.connection.root.aggregate(self.rank, self.sync_round_id, tensor_list_to_transmit)
+            tensor_list_received = [rpyc.classic.obtain(i).cuda() for i in tensor_list_received] if CUDA \
+                else [rpyc.classic.obtain(i) for i in tensor_list_received]
             self.transmit_interlayer.restore_model_from_tensor_list_received(tensor_list_received)
             return True
         return False

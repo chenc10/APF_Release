@@ -3,7 +3,7 @@ then
 		echo 'Please input the exp trial_no to kill!'
 		echo
 		echo 'Ongoing trial processes for your reference: '
-		ps -ef | grep `pwd` | grep 'ssh' | grep 'rank=0'
+		ps -ef | grep `pwd` | grep 'ssh'
 		exit
 fi
 echo 'Process killed: '
