@@ -3,7 +3,7 @@ home='/root/adaptive_freezing'
 
 ### prepare master and workers
 master='localhost'
-workers='localhost'
+workers='localhost localhost'
 echo 'master(coordinator): '$master
 echo 'worker_hosts: '$workers
 world_size=0

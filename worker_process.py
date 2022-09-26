@@ -118,7 +118,7 @@ if __name__ == "__main__":
     print
 
     ''' B. Synchronization Profile '''
-    sync_frequency = 10
+    sync_frequency = 100
     interlayer_type = 'CMFL'  # Default, APF, Gaia, CMFL
     interlayer_type = 'Gaia'  # Default, APF, Gaia, CMFL
     interlayer_type = 'APF'  # Default, APF, Gaia, CMFL

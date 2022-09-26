@@ -12,6 +12,7 @@ class AggregationService(Service):
         self.world_size = world_size
         self.tensor_lists_collected = [0] * world_size
         self.has_arrived = [0] * world_size
+        self.aggregated_tensor_list = None
 
     def logging(self, string):
         print('['+str(datetime.datetime.now())+'] [Server] '+str(string))
@@ -25,7 +26,7 @@ class AggregationService(Service):
         ''' handle the case when all the clients have reported '''
         if sum(self.has_arrived) == self.world_size:
             ''' make aggregation and conduct potential analysis '''
-            aggregated_tensor_list = self.calculate_model_average()
+            self.aggregated_tensor_list = self.calculate_model_average()
 
             ''' reset '''
             self.has_arrived = [0] * self.world_size
@@ -36,7 +37,7 @@ class AggregationService(Service):
             time.sleep(0.01)
 
         self.logging('return rank %d, round_id %d' % (rank, round_id))
-        return aggregated_tensor_list
+        return self.aggregated_tensor_list
 
     def calculate_model_average(self):
         aggregated_tensor_list = []
