@@ -17,7 +17,7 @@ class Client:
         self.rank = local_profile['rank']
         
         ''' Model Initialization '''
-        self.model_manager = Model_Manager(local_profile['model_profile'])
+        self.model_manager = Model_Manager(local_profile['model_name'])
         self.model = self.model_manager.load_model()
         self.optimizer = self.model_manager.get_optimizer()
         self.loss_func = self.model_manager.get_loss_func()
@@ -59,7 +59,6 @@ class Client:
             epoch_id += 1 
             self.logging('start epoch: %d' % epoch_id)
             for step, (b_x, b_y) in enumerate(self.training_dataloader):
-                # self.logging('start iteration: %d' % step)
                 iter_id += 1
                 if CUDA:
                     b_x = b_x.cuda()
@@ -67,15 +66,11 @@ class Client:
                 self.optimizer.zero_grad()
                 self.loss_func(self.model(b_x), b_y).backward()
                 self.optimizer.step()
-                # self.logging('finish local iteration: %d' % step)
                 if self.sync_manager.try_sync_model(iter_id):
-                    # self.logging('finish try_sync: %d' % step)
                     round_id += 1
                     if self.rank == 0:
                         accuracy = self.test()
                         self.logging(' - test - iter_id: %d; epoch_id: %d, round_id: %d; accuracy: %.4f;' % (iter_id, epoch_id, self.sync_manager.sync_round_id, accuracy))
-                        # numpy.save('/root/adaptive_freezing/vgg-npy/param_round_%d' % round_id, list(self.model.parameters())[0][0].detach().cpu().numpy())
-                # self.logging('finish iteration: %d' % step)
             self.logging('finish epoch: %d\n' % epoch_id)
 
 
@@ -103,9 +98,7 @@ if __name__ == "__main__":
     model_name, dataset_name, is_iid = 'CNN_Cifar10', 'Cifar10', True
     local_profile = {
         'rank' : args.rank,
-        'model_profile' : {
-            'model_name' : model_name,
-        },
+        'model_name' : model_name,
         'dataset_profile' : {
             'dataset_name' : dataset_name,
             'is_iid' : is_iid,

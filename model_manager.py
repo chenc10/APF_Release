@@ -31,9 +31,9 @@ ModelHyperparameterDict = {
     }
 
 class Model_Manager:
-    def __init__(self, model_profile):
-        self.model_name = model_profile['model_name']
-        self.hyperparameters = ModelHyperparameterDict[model_profile['model_name']]
+    def __init__(self, model_name):
+        self.model_name = model_name
+        self.hyperparameters = ModelHyperparameterDict[model_name]
 
         self.model = None
         self.optimizer = None

@@ -8,13 +8,18 @@ from rpyc.utils.server import ThreadedServer
 CUDA = torch.cuda.is_available()
 
 class AggregationService(Service):
-    def __init__(self, world_size):
-        self.world_size = world_size
-        self.tensor_lists_collected = [0] * world_size
-        self.has_arrived = [0] * world_size
-        self.aggregated_tensor_list = None
+    def __init__(self, edge_number):
+        self.relaxation_factor = 0.9
+        self.edge_number = edge_number
+        self.global_tensor_list = None
 
-        self.report_time_lists = [[] for i in range(world_size)]
+        self.last_pushed_tensor_lists = [None] * edge_number # can be deleted later
+        self.last_pull_times = [0] * edge_number
+
+        self.latest_round_times = [0] * edge_number
+        self.ema_max_round_time = 0 # current weight: 0.1
+        self.pull_gap_time = 0
+
         self.next_pull_time = 0
         self.next_pull_rank = 0
 
@@ -23,39 +28,44 @@ class AggregationService(Service):
         sys.stdout.flush()
 
     def exposed_aggregate(self, rank, round_id, tensor_list):
-        self.logging('receive rank %d, round_id %d' % (rank, round_id))
-        self.tensor_lists_collected[rank] = rpyc.classic.obtain(tensor_list)
-        self.has_arrived[rank] = 1
 
-        ''' handle the case when all the clients have reported '''
-        if sum(self.has_arrived) == self.world_size:
-            ''' make aggregation and conduct potential analysis '''
-            self.aggregated_tensor_list = self.calculate_model_average()
-            self.next_pull_time = 0
-            self.next_pull_rank = 0
+        ''' record push content and push time '''
+        tensor_list = rpyc.classic.obtain(tensor_list)
+        push_time = time.time()
+        if round_id > 3: # avoid boundary case (the round_time would be inaccurate in the early stage)
+            self.latest_round_times[rank] = push_time - self.last_pull_times[rank]
+        self.logging('receive tensor from rank %d, round_id %d, latest_round_time: %.2f' % (rank, round_id, self.latest_round_times[rank]))
 
-            ''' reset '''
-            self.has_arrived = [0] * self.world_size
-            self.tensor_lists_collected = [0] * self.world_size
-
-        ''' otherwise, keep spining (blocked) '''
-        while self.has_arrived[rank] == 1:
+        ''' keep spining if the arriving edge does not get its turn '''
+        while time.time() < self.next_pull_time or rank != self.next_pull_rank:
             time.sleep(0.01)
-
-        self.logging('return rank %d, round_id %d' % (rank, round_id))
-        return self.aggregated_tensor_list
-
-    def calculate_model_average(self):
-        aggregated_tensor_list = []
-        for tensor_id, tensor_content in enumerate(self.tensor_lists_collected[0]):
-            # calculate average layer by layer
-            sum_tensor = torch.zeros(tensor_content.size())
-            for rank in range(self.world_size):
-                sum_tensor += self.tensor_lists_collected[rank][tensor_id]
-            aggregated_tensor = sum_tensor / self.world_size
-            aggregated_tensor_list.append(aggregated_tensor)
         
-        return aggregated_tensor_list
+        ''' At its turn, update the model parameters '''
+        if self.last_pull_times[rank] == 0: # boundary case: init the local model on all the clients
+            if rank == 0: # set the first client's local model as the global one and return
+                self.global_tensor_list = tensor_list
+            self.last_pushed_tensor_lists[rank] = copy.deepcopy(self.global_tensor_list)
+        else: # regular case: update the global model with the reported local gradient
+            gradient_list = [tensor_list[i]-self.last_pushed_tensor_lists[rank][i] for i in range(len(tensor_list))]
+            for tensor_id, tensor_content in enumerate(self.global_tensor_list):
+                self.global_tensor_list[tensor_id] += 1.0/self.edge_number * gradient_list[tensor_id]
+            self.last_pushed_tensor_lists[rank] = tensor_list
+        
+        ''' update pull_gap_time and next_pull_time, then hand over pull-turn to the next edge '''
+        pull_time = time.time()
+        self.last_pull_times[rank] = pull_time
+        if rank == self.edge_number-1: # update max_round_time after the last edge pushes
+            max_round_time = max(self.latest_round_times)
+            self.ema_max_round_time = max_round_time if self.ema_max_round_time == 0 \
+                else self.ema_max_round_time * 0.9 + max_round_time * 0.1
+            self.pull_gap_time = self.ema_max_round_time / float(self.edge_number) * self.relaxation_factor
+            self.logging('latest_round_times: %s, pull_gap_time updated to %.2f' % (self.latest_round_times, self.pull_gap_time))
+
+        self.next_pull_time = pull_time + self.pull_gap_time
+        self.next_pull_rank = (rank + 1) % self.edge_number
+
+        self.logging('return rank %d, round_id %d\n' % (rank, round_id))
+        return self.global_tensor_list
 
 if __name__ == "__main__":
 
